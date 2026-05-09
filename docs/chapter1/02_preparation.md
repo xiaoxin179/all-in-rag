@@ -477,6 +477,49 @@ git --version
    ```bash
    conda activate all-in-rag
    ```
+在cursor中无法激活解决方案：
+
+> **根本原因**：pyenv-win 的 shims 优先级高于 conda，导致 Python 指向错误。只需将 pyenv-win 从系统 PATH 和用户 PATH 中移除即可。
+
+**方案一：移除 pyenv-win（推荐）**
+
+如果系统中不再需要 pyenv-win（大多数人用 conda 就足够了），从 PATH 中彻底移除它：
+
+1. 打开 **系统环境变量设置**：`Win + R` → 输入 `sysdm.cpl` → 高级 → 环境变量
+2. 在「系统变量」和「用户变量」的 Path 中，分别删除以下两个路径：
+   - `D:\worksoftwore\pyenv-win-master\pyenv-win\bin`
+   - `D:\worksoftwore\pyenv-win-master\pyenv-win\shims`
+3. 确认保存后，**重启 Cursor**（或关闭并重新打开所有终端窗口）
+
+> 如果无法直接修改系统 PATH（需要管理员权限），也可以用 PowerShell 管理员身份执行：
+> ```powershell
+> [Environment]::SetEnvironmentVariable("Path", "<去掉pyenv-win后的新PATH>", "Machine")
+> ```
+
+**方案二：使用 `ral` 命令（conda activate 失效时的备选）**
+
+由于 conda PowerShell 模块存在兼容性问题，在 PowerShell profile 中添加一个快捷激活命令：
+
+1. 编辑 PowerShell 配置文件：
+   ```powershell
+   notepad $PROFILE
+   ```
+2. 在文件末尾添加以下内容（注意替换为你实际的 conda 路径）：
+   ```powershell
+   function ral {
+       $env:Path = "D:\devsoftware\anaconda3\envs\all-in-rag;D:\devsoftware\anaconda3\envs\all-in-rag\Scripts;D:\devsoftware\anaconda3\envs\all-in-rag\Library\bin;" + $env:Path
+       $env:CONDA_DEFAULT_ENV = "all-in-rag"
+       $env:CONDA_PREFIX = "D:\devsoftware\anaconda3\envs\all-in-rag"
+       Write-Host "Activated all-in-rag (Python $(python --version 2>&1))"
+   }
+   ```
+3. 保存后，重新打开终端，执行 `ral` 即可激活环境（显示 Python 版本即成功）。
+
+> **ral** = **r**un **a**ll-**i**n-**r**ag，快捷好记。
+
+**验证**：激活后运行 `python --version`，应显示 `Python 3.12.7`。
+
+---
 
 3.  **依赖安装**
     如果严格安装上述流程当前应该在项目根目录，进入code目录安装依赖库
