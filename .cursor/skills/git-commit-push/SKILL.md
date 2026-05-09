@@ -9,34 +9,33 @@ description: 简化 Git 提交流程，自动执行 git add、commit 和 push。
 
 当用户要求提交代码时，执行以下步骤：
 
-### 1. 确认提交信息
+### 1. 自动执行 Git 命令（无需询问用户）
 
-用户需要提供 commit message。如果没有提供，询问用户。
+由于用户已确认要提交代码，直接依次执行以下三条命令：
 
-### 2. 执行 Git 命令
+**重要**：PowerShell 不支持 `&&` 语法，必须分开执行。使用分号 `;` 连接命令，或使用三个独立的命令调用。
 
-在项目根目录（`d:\selfdevapp\ai\all-in-rag`）依次执行：
-
-```bash
+```powershell
 git add .
 git commit -m "用户的 commit message"
 git push origin main
 ```
 
-### 3. 验证结果
+### 2. 验证结果
 
 - 如果 push 成功，显示成功信息
 - 如果 push 失败（如未连接到远程、权限问题），提示用户具体错误
 
+## 执行方式
+
+| Shell | 命令格式 |
+|-------|---------|
+| PowerShell (Windows) | `git add .; git commit -m "..."; git push origin main` |
+| Bash / Zsh | `git add . && git commit -m "..." && git push origin main` |
+
 ## 注意事项
 
-- 始终使用 `git add .` 添加所有更改
+- **仅限此三条命令自动执行**：git add、git commit、git push
+- 其他 git 命令（如 `git status`、`git log`、`git diff` 等）仍需询问用户是否同意执行
 - commit message 使用用户提供的原始文本
 - 使用 `origin main` 作为默认远程分支
-
-## 示例对话
-
-**用户**: "帮我提交代码"
-**Agent**: "请提供本次提交的描述信息："
-**用户**: "添加 RAG 入门示例代码"
-**Agent**: 执行 git add . → git commit → git push，显示结果
