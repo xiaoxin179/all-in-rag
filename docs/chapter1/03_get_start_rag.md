@@ -81,7 +81,7 @@ usage_metadata={
 }
 ```
 
-> 首次运行时，脚本会下载`BAAI/bge-small-zh-v1.5`嵌入模型。
+> 首次运行时，脚本会下载`BAAI/bge-small-zh-v1.5`嵌入模型。BAAI/bge-small-zh-v1.5 是轻量级中文嵌入模型，负责将文本转为向量供检索使用。
 
 输出参数解析：
 - **`content`**: 这是最核心的部分，即大型语言模型（LLM）根据你的问题和提供的上下文生成的具体回答。
@@ -129,7 +129,7 @@ load_dotenv()
 - **文本分块 (Chunking)**: 为了便于后续的嵌入和检索，长文档被分割成较小的、可管理的文本块（chunks）。这里采用了递归字符分割策略，使用其默认参数进行分块。当不指定参数初始化 `RecursiveCharacterTextSplitter()` 时，其默认行为旨在最大程度保留文本的语义结构：
     - **默认分隔符与语义保留**: 按顺序尝试使用一系列预设的分隔符 `["\n\n" (段落), "\n" (行), " " (空格), "" (字符)]` 来递归分割文本。这种策略的目的是尽可能保持段落、句子和单词的完整性，因为它们通常是语义上最相关的文本单元，直到文本块达到目标大小。
     - **保留分隔符**: 默认情况下 (`keep_separator=True`)，分隔符本身会被保留在分割后的文本块中。
-    - **默认块大小与重叠**: 使用其基类 `TextSplitter` 中定义的默认参数 `chunk_size=4000`（块大小）和 `chunk_overlap=200`（块重叠）。这些参数确保文本块符合预定的大小限制，并通过重叠来减少上下文信息的丢失。
+    - **默认块大小与重叠**: 使用其基类 `TextSplitter` 中定义的默认参数 `chunk_size=4000`（块大小）和 `chunk_overlap=200`（块重叠）。相邻块之间有200个字符重叠，防止关键信息被切断丢失。
     ```python
     text_splitter = RecursiveCharacterTextSplitter()
     texts = text_splitter.split_documents(docs)
