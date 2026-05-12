@@ -33,7 +33,8 @@ context = "数学中，1加1等于2。"
 
 # 调用 LLM
 answer = llm.invoke(prompt.format(question=question, context=context))
-print(answer.content)
+print(f"answer的type:{type(answer)}")
+print(answer)
 
 # Token 消耗统计
 usage = answer.response_metadata.get('token_usage', {})
