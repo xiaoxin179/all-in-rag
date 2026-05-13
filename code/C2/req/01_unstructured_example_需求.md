@@ -1,130 +1,224 @@
-# `01_unstructured_example.py` 动手练习清单
+# 01_unstructured_example.py 动手练习清单
 
 ## RAG 流程定位
 
-当前代码属于 **数据加载（Document Loading）** 环节：
-- 输入：PDF 文件（`rag.pdf`）
-- 处理：使用 `unstructured` 库解析 PDF，提取结构化元素
-- 输出：`elements` 列表，每个元素包含文本内容和类型分类
+当前代码属于 RAG 数据管道的**第一个环节：文档加载（Document Loading）**
 
----
+- **输入**：PDF 文件 (`rag.pdf`)
+- **处理**：使用 Unstructured 的 `partition()` 函数解析 PDF，识别文档结构
+- **输出**：结构化的文档元素列表（包含类型、文本内容）
 
 ## 练习任务
 
-### 练习 1：统计 PDF 中的图片数量
+### 练习 1：使用 partition_pdf 替代 partition
 
-**学习目标**：理解 PDF 解析后元素的多模态性
+**学习目标**：理解 Unstructured 文档加载器中 `partition` 与 `partition_pdf` 的区别
 
 **任务描述**：
-当前代码只打印了文本内容。请修改代码，统计并打印 PDF 中包含的图片（`Image` 类型）数量。
+大白话：原来用的是通用的文档解析器，现在换成专门解析 PDF 的版本。试试看换成 `partition_pdf` 后能不能正常工作。
 
-**关键代码提示**：
+可以
+
+**实现思路**：
+
 ```python
-# 统计图片数量
-image_count = sum(1 for e in elements if e.category == "Image")
-print(f"PDF 中包含 {image_count} 张图片")
+# 原代码
+from unstructured.partition.auto import partition
+
+# 改成
+from unstructured.partition.pdf import partition_pdf
+
+# 调用方式相同
+elements = partition_pdf(
+    filename=pdf_path,
+    # partition_pdf 的专属参数后续练习会用到
+)
 ```
 
 **验证方法**：
-运行后能看到类似 `PDF 中包含 3 张图片` 的输出即成功。
+运行后观察：
+1. 输出的元素数量是否相同
+2. 元素类型分布是否有变化
+3. 是否有报错信息
 
 **扩展思考**：
-- 在 RAG 中，图片如何参与检索？有没有办法把图片转成文字描述？
-- 多模态 RAG 是什么？
+- `partition_pdf` 比 `partition` 多支持哪些参数？
+
+`partition_pdf` 多了 `strategy`、`OCR语言`、`表格识别`、`图片提取`、`页码控制` 这些 PDF 专有参数。如果只是简单解析一个标准 PDF，`partition` 其实够用了。
+
+- 为什么说 `partition_pdf` 性能更优？
 
 ---
 
-### 练习 2：保存解析结果到 JSON 文件
+### 练习 2：尝试不同的 PDF 解析策略
 
-**学习目标**：理解数据持久化的重要性，以及 RAG 管道中中间结果保存
-
-**任务描述**：
-将解析出来的所有元素保存到一个 JSON 文件中，包含每个元素的 `category`（类型）和 `text`（内容）。
-
-**关键代码提示**：
-```python
-import json
-
-# 准备数据
-result = [
-    {"category": e.category, "text": str(e)}
-    for e in elements
-]
-
-# 保存到 JSON
-with open("output.json", "w", encoding="utf-8") as f:
-    json.dump(result, f, ensure_ascii=False, indent=2)
-
-print(f"已保存到 output.json")
-```
-
-**验证方法**：
-生成一个 `output.json` 文件，可以用 VSCode 打开查看结构。
-
-**扩展思考**：
-- 如果数据量很大，JSON 存储有什么问题？
-- RAG 项目中通常用什么方式存储向量数据？
-
----
-
-### 练习 3：只提取"标题"和"段落"元素
-
-**学习目标**：理解 PDF 解析后的元素过滤，理解为什么不是所有元素都适合进入 RAG
+**学习目标**：理解 Unstructured 的 PDF 解析策略参数（strategy）
 
 **任务描述**：
-修改代码，只保留 `Title`（标题）和 `NarrativeText`（段落）类型的元素，过滤掉其他类型（如图片、表格、脚注等）。
+大白话：`partition_pdf` 有三种解析策略 —— `auto`（自动选择）、`fast`（快速但可能丢失精度）、`hi_res`（高精度）。现在分别试试这三种策略，看看结果有什么不同。
 
-**关键代码提示**：
+**实现思路**：
+
 ```python
-# 过滤：只保留标题和段落
-target_categories = {"Title", "NarrativeText"}
-filtered_elements = [e for e in elements if e.category in target_categories]
+from unstructured.partition.pdf import partition_pdf
 
-print(f"过滤后剩余 {len(filtered_elements)} 个元素")
-for e in filtered_elements[:3]:
-    print(f"[{e.category}] {e}")
-```
+pdf_path = "../../data/C2/pdf/rag.pdf"
 
-**验证方法**：
-运行后只看到 `Title` 和 `NarrativeText` 开头的元素。
+# 尝试三种策略
+strategies = ["auto", "fast", "hi_res"]
 
-**扩展思考**：
-- 表格（Table）元素要不要保留？如果要，怎么转成文字？
-- 脚注、页眉页脚通常对回答问题有没有帮助？
-
----
-
-### 练习 4：添加 PDF 密码处理
-
-**学习目标**：理解实际项目中 PDF 可能有各种"异常"情况
-
-**任务描述**：
-当前代码假设 PDF 是可直接打开的。请添加一个检查：如果 PDF 打开失败，尝试用空密码重试（有些 PDF 默认密码为空）。
-
-**关键代码提示**：
-```python
-from unstructured.partition.api import partition_via_api
-from unstructured.partition.pdf_image import partition_pdf
-
-# 尝试无密码打开
-try:
-    elements = partition(filename=pdf_path, content_type="application/pdf")
-except Exception as e:
-    print(f"打开失败，尝试无密码重试: {e}")
-    # partition_pdf 支持 parameters 参数
+for strategy in strategies:
+    print(f"\n{'='*60}")
+    print(f"策略: {strategy}")
+    print('='*60)
+    
     elements = partition_pdf(
         filename=pdf_path,
-        passwords={"": ""}  # 尝试空密码
+        strategy=strategy
     )
+    
+    print(f"元素数量: {len(elements)}")
+    print(f"总字符数: {sum(len(str(e)) for e in elements)}")
+    
+    # 统计元素类型
+    from collections import Counter
+    types = Counter(e.category for e in elements)
+    print(f"元素类型分布: {dict(types)}")
 ```
 
 **验证方法**：
-- 如果你的 PDF 没有密码：代码直接成功
-- 如果有密码：需要找到正确密码才能通过
+1. 对比三种策略的元素数量
+2. 对比元素类型分布是否一致
+3. 注意观察哪种策略速度更快
 
 **扩展思考**：
-- 在企业 RAG 项目中，如何批量处理各种"异常"文件？
-- 有没有专门做文档预处理的库？
+- `hi_res` 策略为什么能获得更高精度？它内部用了什么技术？
+- 什么时候应该用 `fast` 而非 `hi_res`？
+
+---
+
+### 练习 3：启用 OCR 模式解析扫描 PDF
+
+**学习目标**：理解 OCR 在 PDF 解析中的作用
+
+**任务描述**：
+大白话：有些 PDF 是扫描件（图片组成的），没有可选择的文字。这时候需要 OCR 来识别文字。试试 `ocr_only` 模式，看看能不能解析出文字内容。
+
+**实现思路**：
+
+```python
+from unstructured.partition.pdf import partition_pdf
+
+pdf_path = "../../data/C2/pdf/rag.pdf"
+
+# 使用 OCR 专用策略
+elements = partition_pdf(
+    filename=pdf_path,
+    strategy="ocr_only"  # 只用 OCR 模式
+)
+
+print(f"OCR 解析完成: {len(elements)} 个元素")
+for i, element in enumerate(elements[:5], 1):  # 只打印前5个
+    print(f"Element {i} ({element.category}):")
+    print(element)
+    print("-" * 40)
+```
+
+**验证方法**：
+1. 对比 `ocr_only` 和 `hi_res` 的结果
+2. 如果原 PDF 有文字层，两种方式应该都能识别
+3. 如果 PDF 是纯图片扫描件，`ocr_only` 可能反而更准确
+
+**扩展思考**：
+- 什么情况下 `hi_res` + OCR 组合使用效果最好？
+- OCR 的语言参数怎么设置？
+
+---
+
+### 练习 4：提取并保存元数据
+
+**学习目标**：理解文档加载过程中的元数据提取
+
+**任务描述**：
+大白话：Unstructured 解析出来的每个元素都带元数据（metadata），里面包含页码、来源文件等信息。试试把第一个元素的元数据打印出来看看里面有什么。
+
+**实现思路**：
+
+```python
+from unstructured.partition.pdf import partition_pdf
+
+pdf_path = "../../data/C2/pdf/rag.pdf"
+
+elements = partition_pdf(
+    filename=pdf_path,
+    strategy="auto"
+)
+
+# 查看第一个元素的详细信息
+if elements:
+    first_element = elements[0]
+    print(f"元素类型: {first_element.category}")
+    print(f"元素文本: {str(first_element)[:200]}...")
+    print(f"\n元数据内容:")
+    print(first_element.metadata)
+    
+    # 查看所有元素有哪些元数据字段
+    print("\n所有元素的元数据字段（第一个非空示例）:")
+    for key, value in first_element.metadata.__dict__.items():
+        if value is not None:
+            print(f"  {key}: {value}")
+```
+
+**验证方法**：
+1. 观察元数据中包含哪些字段
+2. 注意 `page_number`、`parent_id`、`source` 等字段
+3. 这些元数据在后续 RAG 流程中有什么用？
+
+**扩展思考**：
+- 为什么要保留页码信息？
+- 如何利用元数据来优化检索结果？
+
+---
+
+### 练习 5（可选）：尝试提取图片元素
+
+**学习目标**：了解 PDF 中图片的提取能力
+
+**任务描述**：
+大白话：PDF 里可能包含图片，`partition_pdf` 可以提取图片信息。试试开启图片提取功能，看看能发现多少图片。
+
+**实现思路**：
+
+```python
+from unstructured.partition.pdf import partition_pdf
+
+pdf_path = "../../data/C2/pdf/rag.pdf"
+
+# 使用 hi_res 策略并提取图片
+elements = partition_pdf(
+    filename=pdf_path,
+    strategy="hi_res",
+    extract_image_block_types=["Image"],  # 提取图片
+)
+
+# 筛选出图片类型的元素
+images = [e for e in elements if e.category == "Image"]
+print(f"发现 {len(images)} 张图片")
+
+for i, img in enumerate(images, 1):
+    print(f"\n图片 {i}:")
+    print(f"  元数据: {img.metadata}")
+    print(f"  内容: {str(img)[:100]}...")
+```
+
+**验证方法**：
+1. 检查 PDF 中实际包含多少图片
+2. 观察图片元数据中的分辨率、位置等信息
+3. 思考图片在 RAG 中的处理方式
+
+**扩展思考**：
+- 如果需要提取图片的实际文件（而非元数据），应该怎么做？
+- 多模态 RAG 中图片如何处理？
 
 ---
 
@@ -132,16 +226,12 @@ except Exception as e:
 
 | 概念 | 解释 |
 |------|------|
-| 多模态 | 同时处理文字、图片、音频等多种类型数据 |
-| 文档解析 | 把 PDF/Word 等文件转换成可处理的文本结构 |
-| 元素类型 | 不同库对 PDF 内容有不同的分类方式（Title/NarrativeText/Table/Image） |
-| 多模态 RAG | 用 OCR 或视觉模型处理图片，或将图片转成文字描述再检索 |
-
----
-
-## 继续学习建议
-
-完成这些练习后，下一步可以探索：
-1. 对比 `01_unstructured_example.py`（PDF）和 `02/03/04`（TXT）的加载方式差异
-2. 了解 `unstructured` 库还支持哪些文件格式（Word、HTML、邮件等）
-3. 学习多模态 RAG：用 `marker` 或 `Docling` 等库处理更复杂的 PDF
+| **文档加载器 (Document Loader)** | RAG 流水线的第一步，负责将各种格式的文档解析为程序可处理的结构化数据 |
+| **Unstructured** | 专门为 RAG 场景设计的文档解析库，支持 PDF、Word、HTML 等多种格式 |
+| **partition()** | Unstructured 的统一入口函数，自动识别文件类型并调用对应的解析器 |
+| **partition_pdf()** | 专门用于 PDF 解析的函数，提供更多 PDF 特有参数 |
+| **策略 (strategy)** | PDF 解析的不同策略：`auto` 自动选择、`fast` 快速模式、`hi_res` 高精度模式、`ocr_only` 仅 OCR |
+| **OCR** | 光学字符识别，将图片中的文字转换为可选择的文本 |
+| **元素类型 (Element Category)** | Unstructured 识别出的文档结构类型，如 Title、NarrativeText、Table、ListItem 等 |
+| **元数据 (Metadata)** | 文档元素附带的额外信息，包括页码、来源、坐标等 |
+| **Garbage In, Garbage Out** | RAG 核心原则：高质量输入才能带来高质量输出 |
