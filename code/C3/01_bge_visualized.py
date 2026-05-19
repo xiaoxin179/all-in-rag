@@ -50,7 +50,6 @@ def calculate_customer():
     sim_2 = car_text @ seal_car.T
     sim_3 = car_text @ ts_car.T
     sim_4 = seal_car @ ts_car.T
-
     print("=== 相似度计算结果 ===")
     print(f"文本 vs 纯图像: {sim_1}")
     print(f"文本 vs 图文结合(匹配): {sim_2}")

@@ -9,7 +9,7 @@ from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.llms.deepseek import DeepSeek
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core import Settings
-
+# 递归检索
 load_dotenv()
 
 # 配置模型

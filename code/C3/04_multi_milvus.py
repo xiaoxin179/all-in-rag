@@ -14,7 +14,7 @@ MODEL_NAME = "BAAI/bge-base-en-v1.5"
 MODEL_PATH = "../../models/bge/Visualized_base_en_v1.5.pth"
 DATA_DIR = "../../data/C3"
 COLLECTION_NAME = "multimodal_demo"
-MILVUS_URI = "http://192.168.193.213:19530"
+MILVUS_URI = "http://localhost:19530"
 
 # 2. 定义工具 (编码器和可视化函数)
 class Encoder:
@@ -28,10 +28,14 @@ class Encoder:
             query_emb = self.model.encode(image=image_path, text=text)
         return query_emb.tolist()[0]
     # 编码纯图片
-
     def encode_image(self, image_path: str) -> list[float]:
         with torch.no_grad():
             query_emb = self.model.encode(image=image_path)
+        return query_emb.tolist()[0]
+    # 纯文本编码
+    def encode_text(self, text: str) -> list[float]:
+        with torch.no_grad():
+            query_emb = self.model.encode(text=text)
         return query_emb.tolist()[0]
 
 def visualize_results(query_image_path: str, retrieved_images: list, img_height: int = 300, img_width: int = 300, row_count: int = 3) -> np.ndarray:
@@ -131,12 +135,13 @@ print("已加载 Collection 到内存中。")
 # 7. 执行多模态检索
 print(f"\n--> 正在 '{COLLECTION_NAME}' 中执行检索")
 query_image_path = os.path.join(DATA_DIR, "dragon", "query.png")
-query_text = "一条龙"
+query_text = "car"
 query_vector = encoder.encode_query(image_path=query_image_path, text=query_text)
+query_text_vector=encoder.encode_text(text=query_text)
 
 search_results = milvus_client.search(
     collection_name=COLLECTION_NAME,
-    data=[query_vector],# 支持同时传递多个查询向量，因为我们只传递一个，所以我们直接取出了最终的查询结果
+    data=[query_text_vector],# 支持同时传递多个查询向量，因为我们只传递一个，所以我们直接取出了最终的查询结果
     output_fields=["image_path"],
     limit=5,
     search_params={"metric_type": "COSINE", "params": {"ef": 128}}

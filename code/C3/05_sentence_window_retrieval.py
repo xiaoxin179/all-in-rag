@@ -1,15 +1,28 @@
 import os
+import sys
+from pathlib import Path
+
+# 下载模型（仅首次）: python download_model.py bge-small-en
+model_dir = Path(__file__).parent.parent.parent / "models" / "bge-small-en"
+if not (model_dir / "config.json").exists():
+    sys.path.insert(0, str(Path(__file__).parent))
+    from download_model import download_bge_small_en_model
+    result = download_bge_small_en_model()
+    if not result:
+        raise FileNotFoundError("模型下载失败，无法继续运行")
+
 from llama_index.core.node_parser import SentenceWindowNodeParser, SentenceSplitter
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.llms.deepseek import DeepSeek
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.postprocessor import MetadataReplacementPostProcessor
 
+# 句子窗口检索
 # 1. 配置模型
 Settings.llm = DeepSeek(model="deepseek-chat", temperature=0.1, api_key=os.getenv("DEEPSEEK_API_KEY"))
-Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en")
+Settings.embed_model = HuggingFaceEmbedding(model_name=str(model_dir))
 
-# 2. 加载文档
+# 2. 加载文档，读取文档到内存中
 documents = SimpleDirectoryReader(
     input_files=["../../data/C3/pdf/IPCC_AR6_WGII_Chapter03.pdf"]
 ).load_data()
@@ -22,7 +35,9 @@ node_parser = SentenceWindowNodeParser.from_defaults(
     window_metadata_key="window",
     original_text_metadata_key="original_text",
 )
+# 句子窗口切分
 sentence_nodes = node_parser.get_nodes_from_documents(documents)
+# 构建索引，内部其实就是暴力便利所有的索引
 sentence_index = VectorStoreIndex(sentence_nodes)
 
 # 3.2 常规分块索引 (基准)
