@@ -7,13 +7,14 @@ from pymilvus import MilvusClient, FieldSchema, CollectionSchema, DataType
 import numpy as np
 import cv2
 from PIL import Image
+# 段落窗口检索
 
 # 1. 初始化设置
 MODEL_NAME = "BAAI/bge-base-en-v1.5"
 MODEL_PATH = "../../models/bge/Visualized_base_en_v1.5.pth"
 DATA_DIR = "../../data/C3"
 COLLECTION_NAME = "multimodal_demo"
-MILVUS_URI = "http://localhost:19530"
+MILVUS_URI = "http://192.168.193.213:19530"
 
 # 2. 定义工具 (编码器和可视化函数)
 class Encoder:
@@ -21,11 +22,12 @@ class Encoder:
     def __init__(self, model_name: str, model_path: str):
         self.model = Visualized_BGE(model_name_bge=model_name, model_weight=model_path)
         self.model.eval()
-
+   # 编码图文并茂的
     def encode_query(self, image_path: str, text: str) -> list[float]:
         with torch.no_grad():
             query_emb = self.model.encode(image=image_path, text=text)
         return query_emb.tolist()[0]
+    # 编码纯图片
 
     def encode_image(self, image_path: str) -> list[float]:
         with torch.no_grad():
@@ -111,16 +113,19 @@ if data_to_insert:
 print(f"\n--> 正在为 '{COLLECTION_NAME}' 创建索引")
 index_params = milvus_client.prepare_index_params()
 index_params.add_index(
-    field_name="vector",
-    index_type="HNSW",
-    metric_type="COSINE",
-    params={"M": 16, "efConstruction": 256}
+    field_name="vector",      # ① 要建索引的字段
+    index_type="HNSW",       # ② 索引类型
+    metric_type="COSINE",    # ③ 距离度量方式，余弦相似度
+    params={                 # ④ 索引参数
+        "M": 16,
+        "efConstruction": 256
+    }
 )
 milvus_client.create_index(collection_name=COLLECTION_NAME, index_params=index_params)
 print("成功为向量字段创建 HNSW 索引。")
 print("索引详情:")
 print(milvus_client.describe_index(collection_name=COLLECTION_NAME, index_name="vector"))
-milvus_client.load_collection(collection_name=COLLECTION_NAME)
+milvus_client.load_collection(collection_name=COLLECTION_NAME)   #加载到内存中，数据在磁盘中是无法搜索到的
 print("已加载 Collection 到内存中。")
 
 # 7. 执行多模态检索
@@ -131,7 +136,7 @@ query_vector = encoder.encode_query(image_path=query_image_path, text=query_text
 
 search_results = milvus_client.search(
     collection_name=COLLECTION_NAME,
-    data=[query_vector],
+    data=[query_vector],# 支持同时传递多个查询向量，因为我们只传递一个，所以我们直接取出了最终的查询结果
     output_fields=["image_path"],
     limit=5,
     search_params={"metric_type": "COSINE", "params": {"ef": 128}}

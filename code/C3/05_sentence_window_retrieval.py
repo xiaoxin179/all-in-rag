@@ -16,6 +16,7 @@ documents = SimpleDirectoryReader(
 
 # 3. 创建节点与构建索引
 # 3.1 句子窗口索引
+# 每个节点原本只存一句话，但额外存了前后几句话作为"窗口"。检索时用窗口替换原句，让 LLM 看到更完整的语义。
 node_parser = SentenceWindowNodeParser.from_defaults(
     window_size=3,
     window_metadata_key="window",
