@@ -62,8 +62,9 @@ class HybridMultimodalEncoder:
         self.visual_model = Visualized_BGE(model_name_bge=visual_model_name, model_weight=visual_model_path)
         self.visual_model.eval()   #切换到模型的推理模式
         
-        # 初始化BGE-M3模型（用于混合检索）
-        self.bge_m3 = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
+        # 初始化BGE-M3模型（用于混合检索），使用本地模型避免下载
+        local_bge_m3_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "models", "bge-m3")
+        self.bge_m3 = BGEM3EmbeddingFunction(model_name=local_bge_m3_path, use_fp16=False, device="cpu")
         print(f"BGE-M3 密集向量维度: {self.bge_m3.dim['dense']}")
 
     def encode_multimodal(self, image_path: str, text: str) -> list[float]:
@@ -221,7 +222,7 @@ class HybridMultimodalSearcher:
             categories, locations, environments = [], [], []
             multimodal_vectors, text_sparse_vectors, text_dense_vectors = [], [], []
             
-            for img_data in tqdm(self.dataset.images, desc="生成向量嵌入"):
+            for img_data in tqdm(self.dataset.images, desc="生成向量嵌入"):# tqdm就是python的进度条库
                 text_content = self.dataset.get_text_content(img_data)
                 
                 # 生成多模态向量（图像+文本）
@@ -256,8 +257,8 @@ class HybridMultimodalSearcher:
     
     def search(self, query_image_path: str, query_text: str, mode: str = "hybrid", top_k: int = 5) -> list:
         """执行搜索"""
-        search_params = {"metric_type": "IP", "params": {}}
-        cosine_params = {"metric_type": "COSINE", "params": {"ef": 128}}
+        search_params = {"metric_type": "IP", "params": {}}   #向量的内积
+        cosine_params = {"metric_type": "COSINE", "params": {"ef": 128}}   # 余弦相似度
         output_fields = ["img_id", "image_path", "title", "description", "category", "location", "environment"]
         
         if mode == "multimodal":
@@ -292,10 +293,10 @@ class HybridMultimodalSearcher:
             dense_vec = query_embeddings['dense'][0]
             sparse_vec = query_embeddings['sparse']._getrow(0)
             
-            # 创建RRF融合器
+            # 创建RRF融合器，多路搜索合并，避免单一检索方式偏差
             rerank = RRFRanker(k=60)
             
-            # 创建搜索请求
+            # 创建搜索请求  milvus中封装的请求规范，他对批量查询做了一层抽象
             dense_req = AnnSearchRequest([dense_vec], "text_dense_vector", search_params, limit=top_k)
             sparse_req = AnnSearchRequest([sparse_vec], "text_sparse_vector", search_params, limit=top_k)
             

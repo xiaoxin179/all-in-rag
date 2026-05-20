@@ -5,12 +5,14 @@ from glob import glob
 import torch
 from visual_bge.visual_bge.modeling import Visualized_BGE
 from pymilvus import MilvusClient, FieldSchema, CollectionSchema, DataType
+from pymilvus.model.hybrid import BGEM3EmbeddingFunction
 import numpy as np
 import cv2
 from PIL import Image
 from typing import List, Dict, Any
 from dataclasses import dataclass
-
+from pathlib import Path
+# 多模态龙搜索，，单模态版本
 @dataclass
 class DragonImage:
     """龙类图像数据类"""
@@ -21,8 +23,8 @@ class DragonImage:
     category: str
     location: str
     environment: str
-    combat_details: Dict[str, Any] = None
-    scene_info: Dict[str, Any] = None
+    combat_details: Dict[str, Any] = None    # 战斗细节，风格等
+    scene_info: Dict[str, Any] = None    #使用的技能
 
 class DragonDataset:
     """龙类图像数据集管理类"""
@@ -68,28 +70,66 @@ class DragonDataset:
 
 class Encoder:
     """编码器类，用于将图像和文本编码为向量"""
-    def __init__(self, model_name: str, model_path: str):
-        self.model = Visualized_BGE(model_name_bge=model_name, model_weight=model_path)
-        self.model.eval()
+    def __init__(self, model_name: str, model_path: str, use_local_bge_m3: bool = True):
+        # 初始化 Visual-BGE 模型（用于多模态）
+        self.visual_model = Visualized_BGE(model_name_bge=model_name, model_weight=model_path)
+        self.visual_model.eval()
 
-    def encode_query(self, image_path: str = None, text: str = None) -> list[float]:
-        """编码查询（支持图像+文本或仅文本）"""
-        with torch.no_grad():
-            if image_path and text:
-                query_emb = self.model.encode(image=image_path, text=text)
-            elif image_path:
-                query_emb = self.model.encode(image=image_path)
-            elif text:
-                query_emb = self.model.encode(text=text)
+        # 初始化 BGE-M3 模型（用于混合检索），优先使用本地模型
+        if use_local_bge_m3:
+            local_bge_m3_path = Path(__file__).parent.parent.parent / "models" / "bge-m3"
+            if local_bge_m3_path.exists():
+                print(f"--> 使用本地 BGE-M3 模型: {local_bge_m3_path}")
+                self.bge_m3 = BGEM3EmbeddingFunction(
+                    model_name=str(local_bge_m3_path),
+                    use_fp16=False,
+                    device="cpu"
+                )
+                print(f"BGE-M3 密集向量维度: {self.bge_m3.dim['dense']}")
             else:
-                raise ValueError("必须提供图像路径或文本内容")
-        return query_emb.tolist()[0]
+                print(f"⚠️ 本地 BGE-M3 模型不存在: {local_bge_m3_path}，文本混合检索将被禁用")
+                self.bge_m3 = None
+        else:
+            self.bge_m3 = None
+
+    def encode_query(self, image_path: str = None, text: str = None, mode: str = "multimodal") -> list[float] | dict:
+        """编码查询（支持图像+文本或仅文本），mode 可选 'multimodal' 或 'hybrid'"""
+        with torch.no_grad():
+            if mode == "multimodal":
+                if image_path and text:
+                    query_emb = self.visual_model.encode(image=image_path, text=text)
+                elif image_path:
+                    query_emb = self.visual_model.encode(image=image_path)
+                elif text:
+                    query_emb = self.visual_model.encode(text=text)
+                else:
+                    raise ValueError("必须提供图像路径或文本内容")
+                return query_emb.tolist()[0]
+            elif mode == "hybrid" and self.bge_m3 and text:
+                # 使用 BGE-M3 返回稀疏+密集向量
+                embeddings = self.bge_m3([text])
+                return {
+                    'sparse': embeddings["sparse"]._getrow(0),
+                    'dense': embeddings["dense"][0]
+                }
+            else:
+                raise ValueError(f"无效的 mode '{mode}' 或 BGE-M3 模型未初始化")
 
     def encode_multimodal(self, image_path: str, text: str) -> list[float]:
         """编码多模态内容（图像+文本）"""
         with torch.no_grad():
-            query_emb = self.model.encode(image=image_path, text=text)
+            query_emb = self.visual_model.encode(image=image_path, text=text)
         return query_emb.tolist()[0]
+
+    def encode_text_hybrid(self, text: str) -> dict:
+        """使用 BGE-M3 编码文本，返回稀疏和密集向量"""
+        if not self.bge_m3:
+            raise ValueError("BGE-M3 模型未初始化，无法使用混合编码")
+        embeddings = self.bge_m3([text])
+        return {
+            'sparse': embeddings["sparse"]._getrow(0),
+            'dense': embeddings["dense"][0]
+        }
 
 def visualize_results(query_image_path: str, retrieved_results: list, img_height: int = 300, img_width: int = 300, row_count: int = 3) -> np.ndarray:
     """从检索到的结果创建一个全景图用于可视化"""
@@ -138,24 +178,28 @@ print("--> 正在初始化数据集...")
 dataset = DragonDataset(DATA_DIR, METADATA_PATH)
 print(f"加载了 {len(dataset.images)} 张龙类图像")
 
-print("--> 正在初始化编码器和Milvus客户端...")
-encoder = Encoder(MODEL_NAME, MODEL_PATH)
+print("--> 正在初始化编码器和 Milvus 客户端...")
+encoder = Encoder(MODEL_NAME, MODEL_PATH, use_local_bge_m3=True)
 milvus_client = MilvusClient(uri=MILVUS_URI)
 
-# 3. 创建 Milvus Collection
+# 3. 创建 Milvus Collection（支持多模态、密集、稀疏三种向量）
 print(f"\n--> 正在创建 Collection '{COLLECTION_NAME}'")
 if milvus_client.has_collection(COLLECTION_NAME):
     milvus_client.drop_collection(COLLECTION_NAME)
     print(f"已删除已存在的 Collection: '{COLLECTION_NAME}'")
 
-# 获取向量维度
+# 获取各向量维度
 sample_text = dataset.get_text_content(dataset.images[0])
 sample_path = dataset.images[0].path
-dim = len(encoder.encode_multimodal(sample_path, sample_text))
+multimodal_dim = len(encoder.encode_multimodal(sample_path, sample_text))
+dense_dim = encoder.bge_m3.dim["dense"] if encoder.bge_m3 else None
+
+print(f"多模态向量维度: {multimodal_dim}")
+if dense_dim:
+    print(f"密集向量维度: {dense_dim}")
 
 fields = [
-    FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
-    FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=dim),
+    FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, auto_id=True, max_length=100),
     FieldSchema(name="img_id", dtype=DataType.VARCHAR, max_length=100),
     FieldSchema(name="image_path", dtype=DataType.VARCHAR, max_length=512),
     FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=256),
@@ -163,9 +207,16 @@ fields = [
     FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=64),
     FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=128),
     FieldSchema(name="environment", dtype=DataType.VARCHAR, max_length=64),
+    # 三种向量字段
+    FieldSchema(name="multimodal_vector", dtype=DataType.FLOAT_VECTOR, dim=multimodal_dim),
 ]
 
-schema = CollectionSchema(fields, description="多模态龙类图像检索")
+# 如果 BGE-M3 可用，添加稀疏和密集向量字段
+if encoder.bge_m3 and dense_dim:
+    fields.append(FieldSchema(name="text_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR))
+    fields.append(FieldSchema(name="text_dense_vector", dtype=DataType.FLOAT_VECTOR, dim=dense_dim))
+
+schema = CollectionSchema(fields, description="多模态龙类图像检索（支持混合向量）")
 
 # 创建集合
 milvus_client.create_collection(collection_name=COLLECTION_NAME, schema=schema)
@@ -173,38 +224,82 @@ print(f"成功创建 Collection: '{COLLECTION_NAME}'")
 
 # 4. 准备并插入数据
 print(f"\n--> 正在向 '{COLLECTION_NAME}' 插入数据")
-data_to_insert = []
-for img_data in tqdm(dataset.images, desc="生成多模态嵌入"):
-    # 结合图像和文本信息生成向量
-    text_content = dataset.get_text_content(img_data)
-    vector = encoder.encode_multimodal(img_data.path, text_content)
-    
-    data_to_insert.append({
-        "vector": vector,
-        "img_id": img_data.img_id,
-        "image_path": img_data.path,
-        "title": img_data.title,
-        "description": img_data.description,
-        "category": img_data.category,
-        "location": img_data.location,
-        "environment": img_data.environment
-    })
+img_ids, image_paths, titles, descriptions = [], [], [], []
+categories, locations, environments = [], [], [], []
+multimodal_vectors = []
+text_sparse_vectors = [] if encoder.bge_m3 else None
+text_dense_vectors = [] if encoder.bge_m3 else None
 
-if data_to_insert:
-    result = milvus_client.insert(collection_name=COLLECTION_NAME, data=data_to_insert)
-    print(f"成功插入 {result['insert_count']} 条数据。")
+for img_data in tqdm(dataset.images, desc="生成向量嵌入"):
+    text_content = dataset.get_text_content(img_data)
+
+    # 多模态向量（Visual BGE：图像+文本）
+    multimodal_vector = encoder.encode_multimodal(img_data.path, text_content)
+
+    # 混合向量（BGE-M3：稀疏+密集）
+    if encoder.bge_m3:
+        text_embeddings = encoder.encode_text_hybrid(text_content)
+
+    # 收集元数据
+    img_ids.append(img_data.img_id)
+    image_paths.append(img_data.path)
+    titles.append(img_data.title)
+    descriptions.append(img_data.description)
+    categories.append(img_data.category)
+    locations.append(img_data.location)
+    environments.append(img_data.environment)
+
+    multimodal_vectors.append(multimodal_vector)
+    if encoder.bge_m3:
+        text_sparse_vectors.append(text_embeddings['sparse']._getrow(0))
+        text_dense_vectors.append(text_embeddings['dense'][0])
+
+# 组装插入数据
+if encoder.bge_m3:
+    insert_data = [
+        img_ids, image_paths, titles, descriptions, categories, locations, environments,
+        multimodal_vectors, text_sparse_vectors, text_dense_vectors
+    ]
+else:
+    insert_data = [
+        img_ids, image_paths, titles, descriptions, categories, locations, environments,
+        multimodal_vectors
+    ]
+
+result = milvus_client.insert(collection_name=COLLECTION_NAME, data=insert_data)
+print(f"成功插入 {result['insert_count']} 条数据。")
 
 # 5. 创建索引
 print(f"\n--> 正在为 '{COLLECTION_NAME}' 创建索引")
 index_params = milvus_client.prepare_index_params()
+
+# 多模态向量索引（HNSW + COSINE）
 index_params.add_index(
-    field_name="vector",
+    field_name="multimodal_vector",
     index_type="HNSW",
     metric_type="COSINE",
     params={"M": 16, "efConstruction": 256}
 )
+print("多模态向量索引创建成功")
+
+# 稀疏向量索引（仅当 BGE-M3 可用时）
+if encoder.bge_m3:
+    index_params.add_index(
+        field_name="text_sparse_vector",
+        index_type="SPARSE_INVERTED_INDEX",
+        metric_type="IP"
+    )
+    print("稀疏向量索引创建成功")
+
+    # 密集向量索引（AUTOINDEX + IP）
+    index_params.add_index(
+        field_name="text_dense_vector",
+        index_type="AUTOINDEX",
+        metric_type="IP"
+    )
+    print("密集向量索引创建成功")
+
 milvus_client.create_index(collection_name=COLLECTION_NAME, index_params=index_params)
-print("成功为向量字段创建 HNSW 索引。")
 milvus_client.load_collection(collection_name=COLLECTION_NAME)
 print("已加载 Collection 到内存中。")
 
@@ -214,7 +309,7 @@ print(f"\n--> 正在 '{COLLECTION_NAME}' 中执行多模态检索")
 # 示例1：图像+文本查询
 query_image_path = os.path.join(DATA_DIR, "query.png")
 query_text = "悬崖上的巨龙"
-query_vector = encoder.encode_query(image_path=query_image_path, text=query_text)
+query_vector = encoder.encode_query(image_path=query_image_path, text=query_text, mode="multimodal")
 
 print(f"\n=== 多模态查询（图像+文本）===")
 print(f"查询图像: {query_image_path}")
@@ -225,7 +320,8 @@ search_results = milvus_client.search(
     data=[query_vector],
     output_fields=["img_id", "image_path", "title", "description", "category", "location", "environment"],
     limit=6,
-    search_params={"metric_type": "COSINE", "params": {"ef": 128}}
+    search_params={"metric_type": "COSINE", "params": {"ef": 128}},
+    anns_field="multimodal_vector"
 )[0]
 
 retrieved_results = []
@@ -242,30 +338,50 @@ for i, hit in enumerate(search_results):
         'distance': hit['distance']
     })
 
-# 示例2：纯文本查询
-print(f"\n=== 纯文本查询 ===")
-text_query = "悬崖上的巨龙"
-text_query_vector = encoder.encode_query(text=text_query)
+# 示例2：纯文本混合检索（使用 BGE-M3 的密集+稀疏向量）
+if encoder.bge_m3:
+    print(f"\n=== 纯文本混合检索（BGE-M3）===")
+    text_query = "悬崖上的巨龙"
 
-print(f"查询文本: {text_query}")
+    # 使用 BGE-M3 编码查询文本
+    text_embeddings = encoder.encode_text_hybrid(text_query)
+    dense_vec = text_embeddings['dense']
+    sparse_vec = text_embeddings['sparse']
 
-text_search_results = milvus_client.search(
-    collection_name=COLLECTION_NAME,
-    data=[text_query_vector],
-    output_fields=["img_id", "image_path", "title", "description", "category", "location", "environment"],
-    limit=3,
-    search_params={"metric_type": "COSINE", "params": {"ef": 128}}
-)[0]
+    # 密集向量检索
+    print(f"\n[密集向量检索] 查询文本: {text_query}")
+    dense_search_results = milvus_client.search(
+        collection_name=COLLECTION_NAME,
+        data=[dense_vec],
+        output_fields=["img_id", "image_path", "title", "description", "category"],
+        limit=3,
+        search_params={"metric_type": "IP", "params": {}},
+        anns_field="text_dense_vector"
+    )[0]
+    print("密集检索结果:")
+    for i, hit in enumerate(dense_search_results):
+        print(f"  Top {i+1}: {hit['entity']['title']} (距离: {hit['distance']:.4f})")
 
-print("文本检索结果:")
-for i, hit in enumerate(text_search_results):
-    print(f"  Top {i+1}: {hit['entity']['title']} (距离: {hit['distance']:.4f})")
-    print(f"    描述: {hit['entity']['description'][:80]}...")
+    # 稀疏向量检索
+    print(f"\n[稀疏向量检索] 查询文本: {text_query}")
+    sparse_search_results = milvus_client.search(
+        collection_name=COLLECTION_NAME,
+        data=[sparse_vec],
+        output_fields=["img_id", "image_path", "title", "description", "category"],
+        limit=3,
+        search_params={"metric_type": "IP", "params": {}},
+        anns_field="text_sparse_vector"
+    )[0]
+    print("稀疏检索结果:")
+    for i, hit in enumerate(sparse_search_results):
+        print(f"  Top {i+1}: {hit['entity']['title']} (距离: {hit['distance']:.4f})")
+else:
+    print("\n⚠️ BGE-M3 模型未初始化，跳过纯文本混合检索")
 
 # 示例3：纯图像查询
 print(f"\n=== 纯图像查询 ===")
 image_query_path = os.path.join(DATA_DIR, "query.png")
-image_query_vector = encoder.encode_query(image_path=image_query_path)
+image_query_vector = encoder.encode_query(image_path=image_query_path, text=None, mode="multimodal")
 
 print(f"查询图像: {image_query_path}")
 
@@ -274,7 +390,8 @@ image_search_results = milvus_client.search(
     data=[image_query_vector],
     output_fields=["img_id", "image_path", "title", "description", "category", "location", "environment"],
     limit=3,
-    search_params={"metric_type": "COSINE", "params": {"ef": 128}}
+    search_params={"metric_type": "COSINE", "params": {"ef": 128}},
+    anns_field="multimodal_vector"
 )[0]
 
 print("图像检索结果:")
