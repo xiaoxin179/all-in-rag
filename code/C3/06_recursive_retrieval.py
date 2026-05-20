@@ -12,13 +12,13 @@ from llama_index.core import Settings
 # 递归检索
 load_dotenv()
 
-# 配置模型
+# 配置模型，在lamma-index中配置之后在使用query方法的时候就会自动调用这个llm
 Settings.llm = DeepSeek(model="deepseek-chat", api_key=os.getenv("DEEPSEEK_API_KEY"))
-Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-zh-v1.5")
+Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-zh-v1.5") # 构建索引的时候自动去使用这个模型
 
 # 1.加载数据并为每个工作表创建查询引擎和摘要节点
 excel_file = '../../data/C3/excel/movie.xlsx'
-xls = pd.ExcelFile(excel_file)
+xls = pd.ExcelFile(excel_file)   #打开文件，占用内存小
 
 df_query_engines = {}
 all_nodes = []
@@ -32,7 +32,7 @@ for sheet_name in xls.sheet_names:
     # 为当前工作表创建一个摘要节点（IndexNode）
     year = sheet_name.replace('年份_', '')
     summary = f"这个表格包含了年份为 {year} 的电影信息，可以用来回答关于这一年电影的具体问题。"
-    node = IndexNode(text=summary, index_id=sheet_name)
+    node = IndexNode(text=summary, index_id=sheet_name)   # 构建层级索引
     all_nodes.append(node)
     
     # 存储工作表名称到其查询引擎的映射

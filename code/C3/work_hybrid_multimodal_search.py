@@ -10,7 +10,7 @@ import cv2
 from PIL import Image
 from typing import List, Dict, Any
 from dataclasses import dataclass
-
+# 装饰器自动生成init方法等
 @dataclass
 class DragonImage:
     """龙类图像数据类"""
@@ -35,7 +35,7 @@ class DragonDataset:
     def _load_metadata(self):
         """加载图像元数据"""
         with open(self.metadata_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            data = json.load(f)   #文件内容解析为python字典
             for img_data in data:
                 # 确保图片路径是完整的
                 if not img_data['path'].startswith(self.data_dir):
@@ -60,7 +60,7 @@ class HybridMultimodalEncoder:
     def __init__(self, visual_model_name: str, visual_model_path: str):
         # 初始化Visual-BGE模型（用于多模态）
         self.visual_model = Visualized_BGE(model_name_bge=visual_model_name, model_weight=visual_model_path)
-        self.visual_model.eval()
+        self.visual_model.eval()   #切换到模型的推理模式
         
         # 初始化BGE-M3模型（用于混合检索）
         self.bge_m3 = BGEM3EmbeddingFunction(use_fp16=False, device="cpu")
@@ -182,9 +182,9 @@ class HybridMultimodalSearcher:
             FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=128),
             FieldSchema(name="environment", dtype=DataType.VARCHAR, max_length=64),
             # 三种向量类型
-            FieldSchema(name="multimodal_vector", dtype=DataType.FLOAT_VECTOR, dim=multimodal_dim),
-            FieldSchema(name="text_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
-            FieldSchema(name="text_dense_vector", dtype=DataType.FLOAT_VECTOR, dim=dense_dim)
+            FieldSchema(name="multimodal_vector", dtype=DataType.FLOAT_VECTOR, dim=multimodal_dim),# 多模态向量
+            FieldSchema(name="text_sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),# 稀疏向量
+            FieldSchema(name="text_dense_vector", dtype=DataType.FLOAT_VECTOR, dim=dense_dim)# 稠密向量
         ]
 
         schema = CollectionSchema(fields, description="混合多模态龙类图像检索")
