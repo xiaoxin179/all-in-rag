@@ -1,12 +1,35 @@
 import os
-from langchain_deepseek import ChatDeepSeek 
+import requests
+from urllib3.util import make_headers
+
+_original_default_headers = requests.cookies.RequestsCookieJar.copy
+
+def _no_br_headers():
+    headers = make_headers(accept_encoding=True)
+    if "br" in headers.get("accept-encoding", ""):
+        headers["accept-encoding"] = headers["accept-encoding"].replace(", br", "").replace(",br", "").replace("br,", "").replace("br", "")
+    return headers
+
+import requests
+session = requests.Session()
+_original_send = requests.adapters.HTTPAdapter.send
+
+def patched_send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+    accept = request.headers.get("Accept-Encoding", "")
+    if "br" in accept:
+        request.headers["Accept-Encoding"] = accept.replace("br", "").replace(",,", ",").strip().rstrip(",")
+    return _original_send(self, request, stream, timeout, verify, cert, proxies)
+
+requests.adapters.HTTPAdapter.send = patched_send
+
+from langchain_deepseek import ChatDeepSeek
 from langchain_community.document_loaders import BiliBiliLoader
 from langchain.chains.query_constructor.base import AttributeInfo
 from langchain.retrievers.self_query.base import SelfQueryRetriever
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 import logging
-
+# 把 B 站视频的元数据存到向量库中，然后用大语言模型作为"翻译层"，把"时间最短的视频"这类自然语言自动翻译成数据库过滤条件，实现精准筛选。
 logging.basicConfig(level=logging.INFO)
 
 # 1. 初始化视频数据

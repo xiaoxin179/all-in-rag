@@ -3,7 +3,7 @@ import os
 import numpy as np
 from pymilvus import connections, MilvusClient, FieldSchema, CollectionSchema, DataType, Collection, AnnSearchRequest, RRFRanker
 from pymilvus.model.hybrid import BGEM3EmbeddingFunction
-
+# 基于 SigLIP + TF-IDF 混合检索
 # 1. 初始化设置
 COLLECTION_NAME = "dragon_hybrid_demo"
 MILVUS_URI = "http://localhost:19530"  # 服务器模式
@@ -25,16 +25,16 @@ if milvus_client.has_collection(COLLECTION_NAME):
     milvus_client.drop_collection(COLLECTION_NAME)
 
 fields = [
-    FieldSchema(name="pk", dtype=DataType.VARCHAR, is_primary=True, auto_id=True, max_length=100),
+    FieldSchema(name="pk", dtype=DataType.VARCHAR, is_primary=True, auto_id=True, max_length=100),#
     FieldSchema(name="img_id", dtype=DataType.VARCHAR, max_length=100),
-    FieldSchema(name="path", dtype=DataType.VARCHAR, max_length=256),
-    FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=256),
+    FieldSchema(name="path", dtype=DataType.VARCHAR, max_length=256), # 图像文件的相对路径
+    FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=256),#
     FieldSchema(name="description", dtype=DataType.VARCHAR, max_length=4096),
     FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=64),
     FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=128),
-    FieldSchema(name="environment", dtype=DataType.VARCHAR, max_length=64),
-    FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
-    FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=ef.dim["dense"])
+    FieldSchema(name="environment", dtype=DataType.VARCHAR, max_length=64),# 环境类型，室内，室外，水下
+    FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR), # 稀疏向量
+    FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=ef.dim["dense"]) #稠密向量
 ]
 
 # 如果集合不存在，则创建它及索引
@@ -47,14 +47,14 @@ if not milvus_client.has_collection(COLLECTION_NAME):
 
     # 4. 创建索引
     print("--> 正在为新集合创建索引...")
-    sparse_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}
+    sparse_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}   # ip:向量内积
     collection.create_index("sparse_vector", sparse_index)
     print("稀疏向量索引创建成功。")
 
     dense_index = {"index_type": "AUTOINDEX", "metric_type": "IP"}
     collection.create_index("dense_vector", dense_index)
     print("密集向量索引创建成功。")
-
+# 获取到collection的一个引用便于后续的插入操作等等
 collection = Collection(COLLECTION_NAME)
 
 # 5. 加载数据并插入
@@ -84,6 +84,8 @@ if collection.is_empty:
     print(f"--> 数据加载完成，共 {len(docs)} 条。")
 
     print("--> 正在生成向量嵌入...")
+
+    #这行代码通过 SigLIPEmbeddingFunction 类的 __call__ 方法，同时生成文本的 SigLIP 密集向量（语义理解）和 TF-IDF 稀疏向量（关键词匹配），返回一个包含两种向量的字典。
     embeddings = ef(docs)
     print("--> 向量生成完成。")
 
@@ -98,8 +100,8 @@ if collection.is_empty:
     environments = [doc["environment"] for doc in metadata]
     
     # 获取向量
-    sparse_vectors = embeddings["sparse"]
-    dense_vectors = embeddings["dense"]
+    sparse_vectors = embeddings["sparse"]  # 稀疏向量：TF-IDF，关键词精确匹配
+    dense_vectors = embeddings["dense"]    # 密集向量：SigLIP，语义深度理解
     
     # 插入数据
     collection.insert([
@@ -128,7 +130,7 @@ print(f"\n{'='*20} 开始混合搜索 {'='*20}")
 print(f"查询: '{search_query}'")
 print(f"过滤器: '{search_filter}'")
 
-query_embeddings = ef([search_query])
+query_embeddings = ef([search_query])  # 对搜索词同时生成密集向量和稀疏向量
 dense_vec = query_embeddings["dense"][0]
 sparse_vec = query_embeddings["sparse"]._getrow(0)
 
@@ -181,7 +183,7 @@ for i, hit in enumerate(sparse_results):
     print(f"    描述: {hit.entity.get('description')[:100]}...")
 
 print("\n--- [混合] 稀疏+密集向量搜索结果 ---")
-# 创建 RRF 融合器
+# 创建 RRF 融合器：合并多路检索结果，综合密集向量（语义）和稀疏向量（关键词）的排名
 rerank = RRFRanker(k=60)
 
 # 创建搜索请求
